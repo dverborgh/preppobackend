@@ -27,13 +27,6 @@ const validateCampaignId = [
     .withMessage('Campaign ID must be a valid UUID'),
 ];
 
-const validateSessionId = [
-  body('session_id')
-    .optional()
-    .isUUID()
-    .withMessage('Session ID must be a valid UUID'),
-];
-
 /**
  * Validation middleware for generator ID
  */
