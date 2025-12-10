@@ -33,6 +33,32 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build: .
+    container_name: preppo-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - PORT=8000
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=preppo_user
+      - DATABASE_PASSWORD=preppo_local_pass_2024
+      - DATABASE_NAME=preppo_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=preppo_redis_pass_2024
+    env_file:
+      - .env
+    volumes:
+      - ./uploads:/app/uploads
+
 volumes:
   postgres_data:
     driver: local
