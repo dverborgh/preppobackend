@@ -1,0 +1,376 @@
+/**
+ * Unit tests for Suno API client
+ */
+
+// Mock config and logger BEFORE any imports
+jest.mock('../../../src/config', () => ({
+  default: {
+    music: {
+      sunoBaseUrl: 'https://api.suno.ai',
+      sunoApiKey: 'test-api-key',
+    },
+    logging: {
+      filePath: '/tmp/test-logs/app.log',
+      level: 'info',
+    },
+    openai: {
+      apiKey: 'test-openai-key',
+    },
+  },
+}));
+jest.mock('../../../src/utils/logger');
+jest.mock('axios');
+
+import axios from 'axios';
+import * as sunoApiClient from '../../../src/services/sunoApiClient';
+import { ValidationError } from '../../../src/types';
+
+const mockedAxios = axios as jest.Mocked<typeof axios>;
+
+describe('Suno API Client', () => {
+  let mockAxiosInstance: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    mockAxiosInstance = {
+      post: jest.fn(),
+      get: jest.fn(),
+      interceptors: {
+        response: {
+          use: jest.fn(),
+        },
+      },
+    };
+
+    mockedAxios.create.mockReturnValue(mockAxiosInstance);
+  });
+
+  describe('generateTrack', () => {
+    it('should generate track successfully with all options', async () => {
+      mockAxiosInstance.post.mockResolvedValue({
+        data: {
+          id: 'suno-track-123',
+        },
+        status: 200,
+        config: { url: '/api/generate' },
+      });
+
+      const result = await sunoApiClient.generateTrack('Epic battle music', {
+        bpm: 140,
+        duration: 180,
+        tags: ['orchestral', 'intense'],
+      });
+
+      expect(result).toEqual({
+        sunoTrackId: 'suno-track-123',
+        status: 'generating',
+      });
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+        '/api/generate',
+        expect.objectContaining({
+          prompt: 'Epic battle music',
+          bpm: 140,
+          duration: 180,
+          tags: 'orchestral, intense',
+          make_instrumental: false,
+          wait_audio: false,
+        })
+      );
+    });
+
+    it('should generate track without optional parameters', async () => {
+      mockAxiosInstance.post.mockResolvedValue({
+        data: { track_id: 'suno-456' },
+        status: 200,
+        config: { url: '/api/generate' },
+      });
+
+      const result = await sunoApiClient.generateTrack('Simple prompt');
+
+      expect(result).toEqual({
+        sunoTrackId: 'suno-456',
+        status: 'generating',
+      });
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+        '/api/generate',
+        expect.not.objectContaining({
+          bpm: expect.anything(),
+          duration: expect.anything(),
+          tags: expect.anything(),
+        })
+      );
+    });
+
+    it('should handle array response format', async () => {
+      mockAxiosInstance.post.mockResolvedValue({
+        data: [{ id: 'suno-array-123' }],
+        status: 200,
+        config: { url: '/api/generate' },
+      });
+
+      const result = await sunoApiClient.generateTrack('Test prompt');
+
+      expect(result.sunoTrackId).toBe('suno-array-123');
+    });
+
+    it('should throw ValidationError for empty prompt', async () => {
+      await expect(sunoApiClient.generateTrack('')).rejects.toThrow(ValidationError);
+      await expect(sunoApiClient.generateTrack('   ')).rejects.toThrow('Prompt is required');
+    });
+
+    it('should throw ValidationError for prompt exceeding 200 characters', async () => {
+      const longPrompt = 'a'.repeat(201);
+
+      await expect(sunoApiClient.generateTrack(longPrompt)).rejects.toThrow(
+        'Prompt must not exceed 200 characters'
+      );
+    });
+
+    it('should use test mode when testMode flag is true', async () => {
+      const result = await sunoApiClient.generateTrack('Test prompt', {
+        testMode: true,
+      });
+
+      expect(result.sunoTrackId).toMatch(/^mock-/);
+      expect(result.status).toBe('completed');
+      expect(mockAxiosInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('should throw error if no track ID in response', async () => {
+      mockAxiosInstance.post.mockResolvedValue({
+        data: {},
+        status: 200,
+        config: { url: '/api/generate' },
+      });
+
+      await expect(sunoApiClient.generateTrack('Test prompt')).rejects.toThrow(
+        'No track ID in Suno API response'
+      );
+    });
+
+    it('should handle 429 rate limit error', async () => {
+      const error: any = new Error('Rate limit');
+      error.response = { status: 429 };
+      error.config = { url: '/api/generate' };
+      mockAxiosInstance.post.mockRejectedValue(error);
+
+      await expect(sunoApiClient.generateTrack('Test prompt')).rejects.toThrow(
+        'Rate limit exceeded. Please try again later.'
+      );
+    });
+
+    it('should handle 402 insufficient credits error', async () => {
+      const error: any = new Error('No credits');
+      error.response = { status: 402 };
+      error.config = { url: '/api/generate' };
+      mockAxiosInstance.post.mockRejectedValue(error);
+
+      await expect(sunoApiClient.generateTrack('Test prompt')).rejects.toThrow(
+        'Insufficient credits'
+      );
+    });
+
+    it('should handle 400 bad request error', async () => {
+      const error: any = new Error('Bad request');
+      error.response = { status: 400 };
+      error.config = { url: '/api/generate' };
+      mockAxiosInstance.post.mockRejectedValue(error);
+
+      await expect(sunoApiClient.generateTrack('Test prompt')).rejects.toThrow(
+        'Invalid generation request'
+      );
+    });
+
+    it('should handle generic API error', async () => {
+      const error = new Error('Network error');
+      mockAxiosInstance.post.mockRejectedValue(error);
+
+      await expect(sunoApiClient.generateTrack('Test prompt')).rejects.toThrow(
+        'Track generation failed: Network error'
+      );
+    });
+  });
+
+  describe('getTrackStatus', () => {
+    it('should get track status for completed track', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: {
+          status: 'complete',
+          audio_url: 'https://example.com/track.mp3',
+          duration: 180,
+        },
+        status: 200,
+        config: { url: '/api/feed/suno-123' },
+      });
+
+      const result = await sunoApiClient.getTrackStatus('suno-123');
+
+      expect(result).toEqual({
+        status: 'completed',
+        audioUrl: 'https://example.com/track.mp3',
+        duration: 180,
+        error: undefined,
+      });
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/feed/suno-123');
+    });
+
+    it('should get track status for generating track', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: {
+          status: 'processing',
+        },
+        status: 200,
+        config: { url: '/api/feed/suno-456' },
+      });
+
+      const result = await sunoApiClient.getTrackStatus('suno-456');
+
+      expect(result.status).toBe('generating');
+    });
+
+    it('should get track status for failed track', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: {
+          status: 'error',
+          error_message: 'Generation failed',
+        },
+        status: 200,
+        config: { url: '/api/feed/suno-789' },
+      });
+
+      const result = await sunoApiClient.getTrackStatus('suno-789');
+
+      expect(result).toEqual({
+        status: 'failed',
+        audioUrl: undefined,
+        duration: undefined,
+        error: 'Generation failed',
+      });
+    });
+
+    it('should handle array response format', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: [
+          {
+            status: 'completed',
+            url: 'https://example.com/track2.mp3',
+            duration: 240,
+          },
+        ],
+        status: 200,
+        config: { url: '/api/feed/suno-array' },
+      });
+
+      const result = await sunoApiClient.getTrackStatus('suno-array');
+
+      expect(result.status).toBe('completed');
+      expect(result.audioUrl).toBe('https://example.com/track2.mp3');
+    });
+
+    it('should use test mode for mock track IDs', async () => {
+      const result = await sunoApiClient.getTrackStatus('mock-123');
+
+      expect(result.status).toBe('completed');
+      expect(result.audioUrl).toMatch(/soundhelix\.com/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
+    });
+
+    it('should use test mode when testMode flag is true', async () => {
+      const result = await sunoApiClient.getTrackStatus('real-id', true);
+
+      expect(result.status).toBe('completed');
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
+    });
+
+    it('should handle 404 track not found', async () => {
+      const error: any = new Error('Not found');
+      error.response = { status: 404 };
+      error.config = { url: '/api/feed/nonexistent' };
+      mockAxiosInstance.get.mockRejectedValue(error);
+
+      const result = await sunoApiClient.getTrackStatus('nonexistent');
+
+      expect(result).toEqual({
+        status: 'failed',
+        error: 'Track not found',
+      });
+    });
+
+    it('should throw error for other API errors', async () => {
+      const error = new Error('Server error');
+      mockAxiosInstance.get.mockRejectedValue(error);
+
+      await expect(sunoApiClient.getTrackStatus('suno-error')).rejects.toThrow(
+        'Track status check failed: Server error'
+      );
+    });
+  });
+
+  describe('getTrackDownloadUrl', () => {
+    it('should get download URL for completed track', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: {
+          status: 'complete',
+          audio_url: 'https://example.com/download.mp3',
+        },
+        status: 200,
+        config: { url: '/api/feed/suno-download' },
+      });
+
+      const url = await sunoApiClient.getTrackDownloadUrl('suno-download');
+
+      expect(url).toBe('https://example.com/download.mp3');
+    });
+
+    it('should throw ValidationError for track not ready', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: {
+          status: 'processing',
+        },
+        status: 200,
+        config: { url: '/api/feed/suno-pending' },
+      });
+
+      await expect(
+        sunoApiClient.getTrackDownloadUrl('suno-pending')
+      ).rejects.toThrow('Track is not ready for download yet');
+    });
+
+    it('should throw error if completed track has no audio URL', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: {
+          status: 'complete',
+          audio_url: null,
+        },
+        status: 200,
+        config: { url: '/api/feed/suno-no-url' },
+      });
+
+      await expect(
+        sunoApiClient.getTrackDownloadUrl('suno-no-url')
+      ).rejects.toThrow('No audio URL available for completed track');
+    });
+
+    it('should work with test mode', async () => {
+      const url = await sunoApiClient.getTrackDownloadUrl('mock-123', true);
+
+      expect(url).toMatch(/soundhelix\.com/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sleep', () => {
+    it('should sleep for specified duration', async () => {
+      const start = Date.now();
+      await sunoApiClient.sleep(50);
+      const duration = Date.now() - start;
+
+      expect(duration).toBeGreaterThanOrEqual(45);
+      expect(duration).toBeLessThan(100);
+    });
+  });
+});

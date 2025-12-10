@@ -1,0 +1,13 @@
+This is a test text file for resource upload testing.
+
+It contains multiple lines and some basic content that simulates
+a campaign resource like lore notes or character descriptions.
+
+## Section 1: Basic Information
+This section contains basic information about the test resource.
+
+## Section 2: Sample Data
+Here we have some sample data that can be used for testing
+the resource processing pipeline.
+
+Total size: approximately 500 bytes.
