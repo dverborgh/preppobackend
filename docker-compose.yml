@@ -37,8 +37,6 @@ services:
     build: .
     container_name: preppo-backend
     restart: unless-stopped
-    ports:
-      - "${PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,8 +57,26 @@ services:
     volumes:
       - ./uploads:/app/uploads
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: preppo-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local

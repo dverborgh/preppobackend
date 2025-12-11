@@ -1,0 +1,13 @@
+{
+    # This option prevents Caddy from trying to get a public certificate for an IP
+    # which would fail. It uses a self-signed cert instead.
+    # REMOVE THIS BLOCK when you switch to a real domain name.
+}
+
+34.133.55.135 {
+    # Forward all traffic to the backend container on port 8000
+    reverse_proxy backend:8000
+    
+    # Use internal self-signed certificate (REMOVE THIS LINE when using a real domain)
+    tls internal
+}
