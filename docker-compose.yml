@@ -44,6 +44,7 @@ services:
         condition: service_healthy
     environment:
       - PORT=${PORT:-8000}
+      - API_BASE_URL=/
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
       - DATABASE_USER=${DATABASE_USER}
